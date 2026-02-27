@@ -22,6 +22,7 @@ using Avalonia.Input.Platform;
 using System.Collections.Generic;
 using Mesen.Controls;
 using Mesen.Localization;
+using Mesen.Mcp;
 using System.Diagnostics;
 using Avalonia.VisualTree;
 using System.Text;
@@ -162,6 +163,7 @@ namespace Mesen.Windows
 			}
 
 			_timerBackgroundFlag.Stop();
+			Task.Run(() => MesenMcpServer.Instance.StopAsync()).Wait(TimeSpan.FromSeconds(3));
 			EmuApi.Stop();
 			_listener?.Dispose();
 			EmuApi.Release();
@@ -258,6 +260,15 @@ namespace Mesen.Windows
 				_model.Init(this);
 
 				ConfigManager.Config.ApplyConfig();
+
+				if(cmdLine.McpEnabled || ConfigManager.Config.Mcp.Enabled) {
+					int port = cmdLine.McpPort ?? (int)ConfigManager.Config.Mcp.Port;
+					_ = MesenMcpServer.Instance.StartAsync(port);
+					ConfigManager.Config.Mcp.Enabled = true;
+					if(cmdLine.McpPort.HasValue) {
+						ConfigManager.Config.Mcp.Port = (uint)cmdLine.McpPort.Value;
+					}
+				}
 
 				if(ConfigManager.Config.Preferences.OverrideGameFolder && Directory.Exists(ConfigManager.Config.Preferences.GameFolder)) {
 					EmuApi.AddKnownGameFolder(ConfigManager.Config.Preferences.GameFolder);

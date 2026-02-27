@@ -99,6 +99,9 @@
 		</RestoreSources>
 	</PropertyGroup>
 	<ItemGroup>
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
+	<ItemGroup>
 		<TrimmerRootAssembly Include="Mesen" />
 		<TrimmerRootAssembly Include="AvaloniaEdit" />
 		<TrimmerRootAssembly Include="Dock.Avalonia" />
@@ -118,6 +121,7 @@
     <PackageReference Include="Dock.Model.Mvvm" Version="11.3.0.2" />
     <PackageReference Include="Dotnet.Bundle" Version="*" />
     <PackageReference Include="ELFSharp" Version="2.17.3" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.*" />
     <PackageReference Include="ReactiveUI.Fody" Version="19.5.41" />
    </ItemGroup>
   <ItemGroup>
@@ -660,5 +664,19 @@
 	<Target Name="PreBuildOsx" BeforeTargets="PreBuildEvent" Condition="'$(RuntimeIdentifier)'=='osx-x64' Or '$(RuntimeIdentifier)'=='osx-arm64'">
     <Exec Command="cp ./Assets/MesenIcon.icns $(OutDir)&#xD;&#xA;cd $(OutDir)&#xD;&#xA;rm -R Dependencies&#xD;&#xA;mkdir Dependencies&#xD;&#xA;cp -R $(ProjectDir)/Dependencies/* Dependencies&#xD;&#xA;cp libHarfBuzzSharp.dylib Dependencies&#xD;&#xA;cp libSkiaSharp.dylib Dependencies&#xD;&#xA;cp MesenCore.dylib Dependencies&#xD;&#xA;cd Dependencies&#xD;&#xA;rm ../Dependencies.zip&#xD;&#xA;zip -r ../Dependencies.zip *&#xD;&#xA;cp ../Dependencies.zip $(ProjectDir)" />
   </Target>
+
+	<!-- Copy MCP DLLs and dependencies into the .app bundle (Dotnet.Bundle misses NuGet DLLs from ASP.NET Core framework references) -->
+	<Target Name="CopyMcpDllsToBundle" AfterTargets="BundleApp" Condition="'$(RuntimeIdentifier)'=='osx-x64' Or '$(RuntimeIdentifier)'=='osx-arm64'">
+		<PropertyGroup>
+			<BundleMacOSDir>$(PublishDir)$(CFBundleName).app/Contents/MacOS/</BundleMacOSDir>
+		</PropertyGroup>
+		<ItemGroup>
+			<McpDlls Include="$(OutDir)ModelContextProtocol*.dll" />
+			<McpDlls Include="$(OutDir)Microsoft.Extensions.*.dll" />
+			<McpDlls Include="$(OutDir)System.Net.ServerSentEvents.dll" />
+		</ItemGroup>
+		<Copy SourceFiles="@(McpDlls)" DestinationFolder="$(BundleMacOSDir)" SkipUnchangedFiles="true" />
+		<Message Importance="high" Text="Copied %(McpDlls.Filename)%(McpDlls.Extension) to .app bundle" />
+	</Target>
 
 </Project>

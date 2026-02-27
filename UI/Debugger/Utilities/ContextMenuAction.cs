@@ -617,6 +617,11 @@ namespace Mesen.Debugger.Utilities
 		[IconFile("Camera")]
 		TakeScreenshot,
 
+		McpServer,
+		McpServerStart,
+		McpServerStop,
+		McpServerConfigurePort,
+
 		[IconFile("Help")]
 		OnlineHelp,
 		[IconFile("CommandLine")]
