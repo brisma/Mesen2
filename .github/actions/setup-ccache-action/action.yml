@@ -21,4 +21,4 @@ runs:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ matrix.compiler }}-${{ matrix.platform.os }}
           restore-keys: |
-            ccache-${{ matrix.compiler }}
+            ccache-${{ matrix.compiler }}-${{ matrix.platform.os }}

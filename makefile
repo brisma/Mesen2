@@ -25,7 +25,20 @@ LINKCHECKUNRESOLVED := -Wl,-z,defs
 
 LINKOPTIONS :=
 MESENOS :=
-UNAME_S := $(shell uname -s)
+
+# Use ?= so we can override these during testing
+UNAME_S ?= $(shell uname -s)
+MACHINE ?= $(shell uname -m)
+
+# Allow overriding the target architecture via ARCH parameter (e.g., ARCH=x64)
+ifneq ($(ARCH),)
+	ifneq (,$(findstring x64,$(ARCH))$(findstring x86_64,$(ARCH)))
+		override MACHINE := x86_64
+	endif
+	ifneq (,$(findstring arm64,$(ARCH))$(findstring aarch64,$(ARCH)))
+		override MACHINE := aarch64
+	endif
+endif
 
 ifeq ($(UNAME_S),Linux)
 	MESENOS := linux
@@ -42,14 +55,12 @@ endif
 
 MESENFLAGS += -m64
 
-MACHINE := $(shell uname -m)
 ifeq ($(MACHINE),x86_64)
 	MESENPLATFORM := $(MESENOS)-x64
 endif
 ifneq ($(filter %86,$(MACHINE)),)
 	MESENPLATFORM := $(MESENOS)-x64
 endif
-# TODO: this returns `aarch64` on one of my machines...
 ifneq ($(filter arm%,$(MACHINE)),)
 	MESENPLATFORM := $(MESENOS)-arm64
 endif
@@ -57,7 +68,7 @@ ifeq ($(MACHINE),aarch64)
 	MESENPLATFORM := $(MESENOS)-arm64
 	ifeq ($(USE_GCC),true)
 		#don't set -m64 on arm64 for gcc (unrecognized option)
-		MESENFLAGS=
+		MESENFLAGS := $(filter-out -m64,$(MESENFLAGS))
 	endif
 endif
 
@@ -131,7 +142,7 @@ endif
 ifeq ($(USE_AOT),true)
 	PUBLISHFLAGS ?=  -r $(MESENPLATFORM) -p:PublishSingleFile=false -p:PublishAot=true -p:SelfContained=true
 else
-	PUBLISHFLAGS ?=  -r $(MESENPLATFORM) --no-self-contained true -p:PublishSingleFile=true
+	PUBLISHFLAGS ?=  -r $(MESENPLATFORM) --no-self-contained -p:PublishSingleFile=true
 endif
 
 

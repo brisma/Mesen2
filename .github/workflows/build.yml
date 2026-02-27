@@ -11,7 +11,6 @@ jobs:
     strategy:
       matrix:
         platform: [
-          {netversion: 6.x, targetframework: net6.0, aot: false, singleFile: true, aotString: ""},
           {netversion: 8.x, targetframework: net8.0, aot: false, singleFile: true, aotString: ""},
           {netversion: 8.x, targetframework: net8.0, aot: true, singleFile: false, aotString: " - AoT"}
         ]
@@ -90,7 +89,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -qy
-          sudo apt-get install -qy libsdl2-dev ccache # The compilers are already installed on GitHub's runners.
+          sudo apt-get install -qy libsdl2-dev ccache zip # The compilers are already installed on GitHub's runners.
 
       - name: Setup CCache
         uses: ./.github/actions/setup-ccache-action
@@ -157,8 +156,8 @@ jobs:
       matrix:
         compiler: [clang, clang_aot]
         platform: [
-          {os: macos-13, arch: x64},
-          {os: macos-14, arch: arm64}
+          {os: macos-15-intel, arch: x64, arch_cmd: "arch -x86_64"},
+          {os: macos-15, arch: arm64, arch_cmd: ""}
         ]
         include:
           - compiler: clang
@@ -167,6 +166,9 @@ jobs:
             make_flags: "USE_AOT=true"
       fail-fast: false
     runs-on: ${{ matrix.platform.os }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
 
     steps:
       - name: Checkout repo
@@ -192,6 +194,11 @@ jobs:
         with:
           ccache-path: '${{ env.brewPrefix }}/opt/ccache/libexec'
 
+      - name: Clear CCache for cross-arch builds
+        if: matrix.platform.arch == 'x64'
+        run: |
+          ccache --clear
+
       - name: Write commit SHA1 to file
         uses: ./.github/actions/build-sha1-action
 
@@ -199,39 +206,125 @@ jobs:
       # forcing colours makes the log a little nicer to read.
       - name: Build Mesen
         run: |
-          ${{ matrix.make_flags }} make -j$(sysctl -n hw.logicalcpu)
+          ${{ matrix.platform.arch_cmd }} make -j$(sysctl -n hw.logicalcpu) ${{ matrix.make_flags }} ARCH=${{ matrix.platform.arch }}
 
-      - name: Sign binary
-        env:
-          APP_NAME: bin/osx-${{ matrix.platform.arch }}/Release/osx-${{ matrix.platform.arch }}/publish/Mesen.app
-          CERT_DATA: ${{ secrets.MACOS_CERTIFICATE }}
-          CERT_PASS: ${{ secrets.MACOS_CERTIFICATE_PWD }}
-          ENTITLEMENTS: UI/Mesen.entitlements
-          SIGNING_IDENTITY: Mesen
-        run: |
-          # Export certs
-          echo "$CERT_DATA" | base64 --decode > /tmp/certs.p12
-          # Create keychain
-          security create-keychain -p actions macos-build.keychain
-          security default-keychain -s macos-build.keychain
-          security unlock-keychain -p actions macos-build.keychain
-          security set-keychain-settings -t 3600 -u macos-build.keychain
-          # Import certs to keychain
-          security import /tmp/certs.p12 -k ~/Library/Keychains/macos-build.keychain -P "$CERT_PASS" -T /usr/bin/codesign -T /usr/bin/productsign
-          # Key signing
-          security set-key-partition-list -S apple-tool:,apple: -s -k actions macos-build.keychain
-          # print identities
-          security find-identity -v macos-build.keychain
-
-          echo "[INFO] Signing app file"
-          codesign --force --deep --timestamp --keychain macos-build.keychain --options=runtime --entitlements "$ENTITLEMENTS" --sign "$SIGNING_IDENTITY" "$APP_NAME"
+      # Code signing disabled - requires MACOS_CERTIFICATE and MACOS_CERTIFICATE_PWD secrets
+      # - name: Sign binary
+      #   env:
+      #     APP_NAME: bin/osx-${{ matrix.platform.arch }}/Release/osx-${{ matrix.platform.arch }}/publish/Mesen.app
+      #     CERT_DATA: ${{ secrets.MACOS_CERTIFICATE }}
+      #     CERT_PASS: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+      #     ENTITLEMENTS: UI/Mesen.entitlements
+      #     SIGNING_IDENTITY: Mesen
+      #   run: |
+      #     echo "$CERT_DATA" | base64 --decode > /tmp/certs.p12
+      #     security create-keychain -p actions macos-build.keychain
+      #     security default-keychain -s macos-build.keychain
+      #     security unlock-keychain -p actions macos-build.keychain
+      #     security set-keychain-settings -t 3600 -u macos-build.keychain
+      #     security import /tmp/certs.p12 -k ~/Library/Keychains/macos-build.keychain -P "$CERT_PASS" -T /usr/bin/codesign -T /usr/bin/productsign
+      #     security set-key-partition-list -S apple-tool:,apple: -s -k actions macos-build.keychain
+      #     security find-identity -v macos-build.keychain
+      #     echo "[INFO] Signing app file"
+      #     codesign --force --deep --timestamp --keychain macos-build.keychain --options=runtime --entitlements "$ENTITLEMENTS" --sign "$SIGNING_IDENTITY" "$APP_NAME"
 
       - name: Zip Mesen.app
         run: |
-          ditto -c -k --sequesterRsrc --keepParent bin/osx-${{ matrix.platform.arch }}/Release/osx-${{ matrix.platform.arch }}/publish/Mesen.app bin/osx-${{ matrix.platform.arch }}/Release/Mesen.app.zip
+          APP_PATH=$(find bin -name "Mesen.app" -type d | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::Could not find Mesen.app in bin directory!"
+            exit 1
+          fi
+          echo "Found app at: $APP_PATH"
+          mkdir -p bin/osx-${{ matrix.platform.arch }}/Release/
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" bin/osx-${{ matrix.platform.arch }}/Release/Mesen.app.zip
 
       - name: Upload Mesen
         uses: actions/upload-artifact@v4
         with:
-          name: Mesen (macOS - ${{ matrix.platform.os }} - ${{ matrix.compiler }})
+          name: Mesen (macOS - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }} - ${{ matrix.compiler }})
           path: bin/osx-${{ matrix.platform.arch }}/Release/Mesen.app.zip
+
+
+  release:
+    needs: [windows, linux, appimage, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Package release assets
+        run: |
+          mkdir -p release
+
+          pack() { local dir="$1" name="$2"; cd "$dir" && zip -r "../../release/${name}" . && cd ../..; }
+
+          # Windows: Mesen (Windows - net8.0) → Mesen-Windows.zip
+          #          Mesen (Windows - net8.0 - AoT) → Mesen-Windows-AoT.zip
+          pack "artifacts/Mesen (Windows - net8.0)"        "Mesen-Windows.zip"
+          pack "artifacts/Mesen (Windows - net8.0 - AoT)"  "Mesen-Windows-AoT.zip"
+
+          # Linux binaries
+          for dir in artifacts/Mesen\ \(Linux\ -*; do
+            base=$(basename "$dir")
+            # Extract os and compiler from "Mesen (Linux - ubuntu-22.04 - gcc)"
+            os=$(echo "$base" | sed 's/.*Linux - \([^ ]*\) - .*/\1/')
+            compiler=$(echo "$base" | sed 's/.*- \([^)]*\))/\1/')
+            # Map os to arch
+            case "$os" in
+              *arm*) arch="arm64" ;;
+              *)     arch="x64" ;;
+            esac
+            # Map compiler to clean suffix
+            case "$compiler" in
+              clang_aot) suffix="-AoT" ;;
+              *)         suffix="-${compiler}" ;;
+            esac
+            chmod +x "$dir"/Mesen 2>/dev/null || true
+            pack "$dir" "Mesen-Linux-${arch}${suffix}.zip"
+          done
+
+          # AppImages: Mesen (Linux x64 - AppImage) → Mesen-Linux-x64.AppImage
+          for dir in artifacts/Mesen\ \(Linux*AppImage*; do
+            base=$(basename "$dir")
+            arch=$(echo "$base" | sed 's/.*Linux \([^ ]*\) - AppImage.*/\1/')
+            cp "$dir"/*.AppImage "release/Mesen-Linux-${arch}.AppImage" 2>/dev/null || true
+          done
+
+          # macOS: Mesen (macOS - macos-15 - arm64 - clang_aot) → Mesen-macOS-arm64-AoT.zip
+          for dir in artifacts/Mesen\ \(macOS*; do
+            base=$(basename "$dir")
+            arch=$(echo "$base" | sed 's/.*- \(x64\|arm64\) - .*/\1/')
+            compiler=$(echo "$base" | sed 's/.*- \([^)]*\))/\1/')
+            case "$compiler" in
+              clang_aot) suffix="-AoT" ;;
+              *)         suffix="" ;;
+            esac
+            cp "$dir"/*.zip "release/Mesen-macOS-${arch}${suffix}.zip" 2>/dev/null || true
+          done
+
+          ls -la release/
+
+      - name: Delete existing latest release
+        run: |
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+
+      - name: Create release
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          gh release create latest \
+            --title "Latest Build ($SHORT_SHA)" \
+            --notes "Automated build from commit ${{ github.sha }} on $(date -u +%Y-%m-%d)" \
+            --prerelease \
+            release/*
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
